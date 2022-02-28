@@ -1,0 +1,128 @@
+% Find the orientation of the tetrahedra after the positions have been
+% found using SSR
+
+
+clc; clearvars; close all;
+
+addpath(genpath([pwd '/mbin/']));
+addpath(genpath([pwd '/Tomohawk/']));
+addpath(genpath([pwd '/data/']));
+
+resDir = [pwd '/results/'];
+plotFig        = 1; %Set to 1 for images of the whole assembly
+plotAllFig = 0;     %Set to 1 for images of all nanoparticles seperately
+%% Import data
+load('D:\programeren\Masterproef matlab files\PentatwinRods-main\PentatwinRods-main\data\ssr_results_10_25.mat')
+SIRT = read_rec('D:\programeren\Masterproef matlab files\PentatwinRods-main\PentatwinRods-main\data\SIRT_100_IL.rec');
+%SIRT = Tiff('D:\programeren\Masterproef matlab files\PentatwinRods-main\PentatwinRods-main\data\SIRT_6_50_p1_Seg_WFoff_data_2_IL810x810x810.tiff','r');
+%imageData = read(SIRT);
+
+% SIRT=str.SIRT;      % The original reconstructed image
+SSR=str.ssr;        % The original image, but all particles are replaced by enveloping spheres
+
+
+figure(1);volshow(SIRT,'Renderer','Isosurface');    %Visualise both
+figure(2);volshow(SSR,'Renderer','Isosurface');
+%% rotate the SIRT image to match the SSR image
+theta=-pi/2;
+Sz=[cos(theta) -sin(theta) 0; sin(theta) cos(theta) 0; 0 0 1];
+Tform=eye(4);
+Tform(1:3,1:3)=Sz;
+Tform(:,4)=0;
+Tform(4,4)=1;
+
+tform_reg1      = affine3d(Tform);     % use affine3d
+    
+sameAsInput     = affineOutputView(size(SIRT),tform_reg1,...
+                        'BoundsStyle','CenterOutput');  % output size
+    
+    % transform the bicones using the transofmation matrices
+    [I_tran,rbp] = imwarp(SIRT,tform_reg1,'OutputView',sameAsInput);
+figure(1);volshow(I_tran,'Renderer','Isosurface');
+SIRT=I_tran;
+%% Manually load the positions
+realSize = size(SIRT);
+resizedSize = size(SSR);
+tau=resizedSize(1)/realSize(1);
+
+centers = coordinatesSIRT1025{:,:}; %make a matrix
+centers=centers/tau;                %rescale the positions acoording to tau
+%% Image cleanup
+%don't do this
+thr         = 0.7*max(SIRTr);         % threshold value
+It          = 0*SIRT;          % initialize the thresholded image
+It(SIRT > thr) = 1;            % set value above threshold to 1.
+
+% plot Figure
+if plotFig,figure(3);volshow(It,'Renderer','Isosurface');end
+
+%% Isolate an area from the main image around every particle
+r=20; %half the size of the cube around each paricle
+
+for i=1:1694 %length(centers(:,1))
+    x=centers(i,1);
+    y=centers(i,2);
+    z=centers(i,3);
+    Isub{i}=SIRT(y-r:y+r,x-r:x+r,z-r:z+r);
+    Isub{i}=Isub{i}/max(Isub{i}(:));
+end
+% show a few of the cropped images
+for i=1:10
+figure(10000+i);volshow(Isub{i},'Renderer','Isosurface');
+end
+%%
+figure(1)
+volumeViewer(Isub{1});
+figure(2)
+imhist(Isub{1});
+figure(3)
+volumeViewer(SIRT);
+figure(1)
+volumeViewer(Isub{500});
+%% Set paramaters for tetrahedron model
+N=size(Isub{1});
+n=N(1);
+r=1;
+thetaV=[0 0 0];
+[X,meshFV] = tetrahedron(n,r,thetaV);
+%% make image to check
+demonstration=X;
+demonstration(1,1,:)=1;
+demonstration(1,:,1)=1;
+demonstration(:,1,1)=1;
+
+%figure(4);volshow(demonstration,'Renderer','Isosurface')
+volumeViewer(X);
+%% Create dictionaryt
+n_angles=18;
+[D] = createTetrahedronDictionary(n,r,n_angles);
+D=double(D);
+%% copy D
+Dcopy=D;
+%% Make the 0 value voxels from the dictionary slightly negative
+for i=1:length(D(1,:))
+    V=D(:,i);
+    Tot = nnz(V);
+    V(V==0) = -1*Tot/(n^3-Tot);
+    D(:,i)=V;
+end
+%% Vectorise the individual cropped images
+for i=1:length(Isub)
+    Ivec{i}=vec(Isub{i});
+end
+
+%% Cross corelate the dictionary models with the cropped image vectors
+for i=1:length(Ivec)
+CCvec=D'*Ivec{i};
+[M(i),I(i)]=max(CCvec);
+i
+end
+%% Visualise the result
+for i=1:20
+bestFit{i}=reshape(D(:,I(i)), size(Isub{1}));
+figure(100+i);volshow(bestFit{i},'Renderer','Isosurface');
+figure(10000+i);volshow(Isub{i},'Renderer','Isosurface');
+end
+%%
+volumeViewer(bestFit{2});
+volumeViewer(Isub{2});
